@@ -66,9 +66,9 @@ alloy-eips = { version = "0.7.3", default-features = false }
 alloy-genesis = { version = "0.7.3", default-features = false }
 
 # revm
-revm = { version = "17.0.0", features = ["std"], default-features = false }
-revm-inspectors = "0.10.0"
-revm-primitives = { version = "13.0.0", features = [
+revm = { version = "18.0.0", features = ["std"], default-features = false }
+revm-inspectors = "0.12.0"
+revm-primitives = { version = "14.0.0", features = [
     "std",
 ], default-features = false }
 revm-interpreter = "10"

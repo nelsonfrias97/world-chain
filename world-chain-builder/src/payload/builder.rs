@@ -1,10 +1,15 @@
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::merge::BEACON_NONCE;
 use reth_evm::ConfigureEvm;
-use reth_node_core::primitives::TransactionSigned;
 use reth_optimism_evm::OpEvmConfig;
-use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpPayloadBuilder, OpPayloadBuilderAttributes};
-use reth_optimism_payload_builder::builder::OpPayloadTransactions;
+use reth_optimism_node::{
+    OpBuiltPayload, OpEngineTypes, OpPayloadBuilder, OpPayloadBuilderAttributes,
+};
+use reth_optimism_payload_builder::builder::{
+    OpBuilder, OpPayloadBuilderCtx, OpPayloadTransactions,
+};
+use reth_optimism_payload_builder::config::OpBuilderConfig;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use reth::api::PayloadBuilderError;
@@ -16,7 +21,7 @@ use reth::revm::database::StateProviderDatabase;
 use reth::revm::db::states::bundle_state::BundleRetention;
 use reth::revm::DatabaseCommit;
 use reth::revm::State;
-use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth::transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BasicPayloadJobGenerator,
     BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome, MissingPayloadBehaviour,
@@ -28,7 +33,7 @@ use reth_evm::system_calls::SystemCaller;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 
-use reth_primitives::{proofs, BlockBody};
+use reth_primitives::{proofs, BlockBody, TransactionSigned};
 use reth_primitives::{Block, Header, Receipt, TxType};
 use reth_provider::{
     BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ExecutionOutcome,
@@ -48,8 +53,8 @@ use crate::rpc::bundle::validate_conditional_options;
 
 /// Priority blockspace for humans builder
 #[derive(Debug, Clone)]
-pub struct WorldChainPayloadBuilder<EvmConfig> {
-    inner: OpPayloadBuilder<EvmConfig>,
+pub struct WorldChainPayloadBuilder<EvmConfig, Txs = ()> {
+    inner: OpPayloadBuilder<EvmConfig, Txs>,
     /// The percentage of the blockspace that should be reserved for verified transactions
     verified_blockspace_capacity: u8,
 }
@@ -58,10 +63,18 @@ impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
-    /// `OptimismPayloadBuilder` constructor.
+    /// `WorldChainPayloadBuilder` constructor.
     pub fn new(evm_config: EvmConfig, verified_blockspace_capacity: u8) -> Self {
-        let inner = OpPayloadBuilder::new(evm_config);
+        Self::with_builder_config(evm_config, Default::default(), verified_blockspace_capacity)
+    }
 
+    /// Configures the builder with the given [`OpBuilderConfig`].
+    pub fn with_builder_config(
+        evm_config: EvmConfig,
+        config: OpBuilderConfig,
+        verified_blockspace_capacity: u8,
+    ) -> Self {
+        let inner = OpPayloadBuilder::with_builder_config(evm_config, config);
         Self {
             inner,
             verified_blockspace_capacity,
@@ -69,12 +82,50 @@ where
     }
 }
 
+impl<EvmConfig, Txs> WorldChainPayloadBuilder<EvmConfig, Txs> {
+    // Sets the rollup's compute pending block configuration option.
+    pub fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
+        self.inner = self.inner.set_compute_pending_block(compute_pending_block);
+        self
+    }
+
+    /// Configures the type responsible for yielding the transactions that should be included in the
+    /// payload.
+    pub fn with_transactions<T: OpPayloadTransactions>(
+        self,
+        best_transactions: T,
+    ) -> WorldChainPayloadBuilder<EvmConfig, T> {
+        let Self {
+            inner,
+            verified_blockspace_capacity,
+            ..
+        } = self;
+        let inner: OpPayloadBuilder<EvmConfig, T> = inner.with_transactions(best_transactions);
+        WorldChainPayloadBuilder {
+            inner,
+            verified_blockspace_capacity,
+        }
+    }
+
+    /// Enables the rollup's compute pending block configuration option.
+    pub fn compute_pending_block(self) -> Self {
+        self.set_compute_pending_block(true)
+    }
+
+    /// Returns the rollup's compute pending block configuration option.
+    pub const fn is_compute_pending_block(&self) -> bool {
+        self.inner.is_compute_pending_block()
+    }
+}
+
 /// Implementation of the [`PayloadBuilder`] trait for [`WorldChainPayloadBuilder`].
-impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for WorldChainPayloadBuilder<EvmConfig>
+impl<Pool, Client, EvmConfig, Txs> PayloadBuilder<Pool, Client>
+    for WorldChainPayloadBuilder<EvmConfig, Txs>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
     Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TransactionSigned>>,
     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    Txs: OpPayloadTransactions,
 {
     type Attributes = OpPayloadBuilderAttributes;
     type BuiltPayload = OpBuiltPayload;
@@ -85,7 +136,7 @@ where
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self
             .inner
-            .cfg_and_block_env(&args.config, &args.config.parent_block)?;
+            .cfg_and_block_env(&args.config.attributes.clone(), &args.config.parent_header.clone()).expect("failed");
 
         worldchain_payload(
             self.inner.evm_config.clone(),
@@ -120,7 +171,11 @@ where
         };
         let (cfg_env, block_env) = self
             .inner
-            .cfg_and_block_env(&args.config, &args.config.parent_block);
+            .cfg_and_block_env(
+                &config.attributes.clone(),
+                &config.parent_header.clone(),
+            )
+            .expect("failed");
 
         worldchain_payload(
             self.inner.evm_config.clone(),
@@ -231,16 +286,15 @@ where
 
     let chain_spec = client.chain_spec();
 
-    let state_provider = client.state_by_block_hash(config.parent_block.hash())?;
+    let state_provider = client.state_by_block_hash(config.parent_header.hash())?;
     let state = StateProviderDatabase::new(state_provider);
     let mut db = State::builder()
         .with_database_ref(cached_reads.as_db(state))
         .with_bundle_update()
         .build();
     let PayloadConfig {
-        parent_block,
         attributes,
-        extra_data
+        extra_data,
         parent_header,
     } = config;
 
