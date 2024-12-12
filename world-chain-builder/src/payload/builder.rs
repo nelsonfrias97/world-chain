@@ -1,6 +1,10 @@
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::merge::BEACON_NONCE;
 use reth_evm::ConfigureEvm;
+use reth_node_core::primitives::TransactionSigned;
+use reth_optimism_evm::OpEvmConfig;
+use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpPayloadBuilder, OpPayloadBuilderAttributes};
+use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use std::sync::Arc;
 
 use reth::api::PayloadBuilderError;
@@ -16,20 +20,14 @@ use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BasicPayloadJobGenerator,
     BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome, MissingPayloadBehaviour,
-    PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
+    PayloadBuilder, PayloadConfig,
 };
 use reth_chain_state::ExecutedBlock;
 use reth_db::DatabaseEnv;
 use reth_evm::system_calls::SystemCaller;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_optimism_evm::OptimismEvmConfig;
-use reth_optimism_forks::OptimismHardfork;
-use reth_optimism_node::{
-    OptimismBuiltPayload, OptimismEngineTypes, OptimismPayloadBuilder,
-    OptimismPayloadBuilderAttributes,
-};
-use reth_optimism_payload_builder::error::OptimismPayloadBuilderError;
+
 use reth_primitives::{proofs, BlockBody};
 use reth_primitives::{Block, Header, Receipt, TxType};
 use reth_provider::{
@@ -51,7 +49,7 @@ use crate::rpc::bundle::validate_conditional_options;
 /// Priority blockspace for humans builder
 #[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilder<EvmConfig> {
-    inner: OptimismPayloadBuilder<EvmConfig>,
+    inner: OpPayloadBuilder<EvmConfig>,
     /// The percentage of the blockspace that should be reserved for verified transactions
     verified_blockspace_capacity: u8,
 }
@@ -61,8 +59,8 @@ where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// `OptimismPayloadBuilder` constructor.
-    pub const fn new(evm_config: EvmConfig, verified_blockspace_capacity: u8) -> Self {
-        let inner = OptimismPayloadBuilder::new(evm_config);
+    pub fn new(evm_config: EvmConfig, verified_blockspace_capacity: u8) -> Self {
+        let inner = OpPayloadBuilder::new(evm_config);
 
         Self {
             inner,
@@ -75,19 +73,19 @@ where
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for WorldChainPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
-    EvmConfig: ConfigureEvm<Header = Header>,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TransactionSigned>>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 {
-    type Attributes = OptimismPayloadBuilderAttributes;
-    type BuiltPayload = OptimismBuiltPayload;
+    type Attributes = OpPayloadBuilderAttributes;
+    type BuiltPayload = OpBuiltPayload;
 
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
-    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
+        args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
+    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self
             .inner
-            .cfg_and_block_env(&args.config, &args.config.parent_block);
+            .cfg_and_block_env(&args.config, &args.config.parent_block)?;
 
         worldchain_payload(
             self.inner.evm_config.clone(),
@@ -101,7 +99,7 @@ where
 
     fn on_missing_payload(
         &self,
-        _args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+        _args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
     ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
         MissingPayloadBehaviour::AwaitInProgress
     }
@@ -110,7 +108,7 @@ where
         &self,
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
-    ) -> Result<OptimismBuiltPayload, PayloadBuilderError> {
+    ) -> Result<OpBuiltPayload, PayloadBuilderError> {
         let args = BuildArguments {
             client,
             config,
@@ -160,17 +158,16 @@ impl WorldChainPayloadServiceBuilder {
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for WorldChainPayloadServiceBuilder
 where
-    Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
-    >,
+    Node:
+        FullNodeTypes<Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>>,
     Pool: TransactionPool<Transaction: WorldChainPoolTransaction> + Unpin + 'static,
 {
     async fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
-        let evm_config = OptimismEvmConfig::new(Arc::new((*ctx.chain_spec()).clone()));
+    ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>> {
+        let evm_config = OpEvmConfig::new(Arc::new((*ctx.chain_spec()).clone()));
 
         let payload_builder =
             WorldChainPayloadBuilder::new(evm_config, self.verified_blockspace_capacity);
@@ -212,12 +209,12 @@ where
 #[inline]
 pub(crate) fn worldchain_payload<EvmConfig, Pool, Client>(
     evm_config: EvmConfig,
-    args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+    args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
     verified_blockspace_capacity: u8,
     _compute_pending_block: bool,
-) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
+) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
@@ -243,7 +240,8 @@ where
     let PayloadConfig {
         parent_block,
         attributes,
-        extra_data,
+        extra_data
+        parent_header,
     } = config;
 
     debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
@@ -304,7 +302,7 @@ where
     )
     .map_err(|err| {
         warn!(target: "payload_builder", %err, "missing create2 deployer, skipping block.");
-        PayloadBuilderError::other(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
+        PayloadBuilderError::other(OpPayloadBuilderError::ForceCreate2DeployerFail)
     })?;
 
     let mut receipts = Vec::with_capacity(attributes.transactions.len());
@@ -317,7 +315,7 @@ where
         // A sequencer's block should never contain blob transactions.
         if sequencer_tx.value().is_eip4844() {
             return Err(PayloadBuilderError::other(
-                OptimismPayloadBuilderError::BlobTransactionRejected,
+                OpPayloadBuilderError::BlobTransactionRejected,
             ));
         }
 
@@ -330,7 +328,7 @@ where
             .clone()
             .try_into_ecrecovered()
             .map_err(|_| {
-                PayloadBuilderError::other(OptimismPayloadBuilderError::TransactionEcRecoverFailed)
+                PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
             })?;
 
         // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -345,7 +343,7 @@ where
             })
             .transpose()
             .map_err(|_| {
-                PayloadBuilderError::other(OptimismPayloadBuilderError::AccountLoadFailed(
+                PayloadBuilderError::other(OpPayloadBuilderError::AccountLoadFailed(
                     sequencer_tx.signer(),
                 ))
             })?;
@@ -650,7 +648,7 @@ where
         trie: Arc::new(trie_output),
     };
 
-    let mut payload = OptimismBuiltPayload::new(
+    let mut payload = OpBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
         total_fees,
@@ -694,11 +692,10 @@ mod tests {
     };
     use reth_db::test_utils::tempdir_path;
     use reth_optimism_chainspec::OpChainSpec;
-    use reth_optimism_evm::OptimismEvmConfig;
+    use reth_optimism_evm::OpEvmConfig;
     use reth_optimism_node::txpool::OpTransactionValidator;
     use reth_primitives::{
-        transaction::WithEncoded, SealedBlock, Signature, TransactionSigned,
-        TransactionSignedEcRecovered, Withdrawals,
+        transaction::WithEncoded, SealedBlock, TransactionSigned, TransactionSignedEcRecovered,
     };
     use revm_primitives::{ruint::aliases::U256, Address, Bytes, TxKind, B256};
     use std::sync::Arc;
@@ -710,7 +707,7 @@ mod tests {
 
         let gas_limit = 30_000_000;
         let chain_spec = Arc::new(ChainSpec::default());
-        let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
+        let evm_config = OpEvmConfig::new(Arc::new(OpChainSpec {
             inner: (*chain_spec).clone(),
         }));
         let blob_store = DiskFileBlobStore::open(data_dir.as_path(), Default::default())?;
@@ -773,7 +770,7 @@ mod tests {
             parent_beacon_block_root: None,
         };
 
-        let payload_attributes = OptimismPayloadBuilderAttributes {
+        let payload_attributes = OpPayloadBuilderAttributes {
             gas_limit: Some(gas_limit),
             transactions: sequencer_transactions.clone(),
             payload_attributes: eth_payload_attributes,
@@ -827,7 +824,7 @@ mod tests {
 
         let gas_limit = 30_000_000;
         let chain_spec = Arc::new(ChainSpec::default());
-        let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
+        let evm_config = OpEvmConfig::new(Arc::new(OpChainSpec {
             inner: (*chain_spec).clone(),
         }));
         let blob_store = DiskFileBlobStore::open(data_dir.as_path(), Default::default())?;
@@ -889,7 +886,7 @@ mod tests {
             parent_beacon_block_root: None,
         };
 
-        let payload_attributes = OptimismPayloadBuilderAttributes {
+        let payload_attributes = OpPayloadBuilderAttributes {
             gas_limit: Some(gas_limit),
             transactions: sequencer_transactions.clone(),
             payload_attributes: eth_payload_attributes,

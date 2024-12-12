@@ -1,4 +1,5 @@
 //! Utilities for running world chain builder end-to-end tests.
+// TODO: Update these tests to send PBH Bundles when the contracts are written
 use crate::{
     node::{
         args::{ExtArgs, WorldChainBuilderArgs},
@@ -21,7 +22,7 @@ use crate::{
 use alloy_eips::eip2718::Decodable2718;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::eip2718::Encodable2718;
-use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
+// use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_signer_local::PrivateKeySigner;
 use chrono::Utc;
@@ -58,11 +59,11 @@ use semaphore::{
     protocol::{generate_nullifier_hash, generate_proof},
     Field,
 };
-use serial_test::serial;
+// use serial_test::serial;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
-    time::Duration,
+    // time::Duration,
 };
 
 pub const DEV_CHAIN_ID: u64 = 8453;
@@ -240,110 +241,110 @@ impl WorldChainBuilderTestContext {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_can_build_pbh_payload() -> eyre::Result<()> {
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    let mut ctx = WorldChainBuilderTestContext::setup().await?;
-    let mut pbh_tx_hashes = vec![];
-    for signer in ctx.pbh_wallets.iter() {
-        let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
-        let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
-        pbh_tx_hashes.push(pbh_hash);
-    }
+// #[tokio::test]
+// #[serial]
+// async fn test_can_build_pbh_payload() -> eyre::Result<()> {
+//     tokio::time::sleep(Duration::from_secs(1)).await;
+//     let mut ctx = WorldChainBuilderTestContext::setup().await?;
+//     let mut pbh_tx_hashes = vec![];
+//     for signer in ctx.pbh_wallets.iter() {
+//         let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
+//         let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
+//         pbh_tx_hashes.push(pbh_hash);
+//     }
 
-    let (payload, _) = ctx.node.advance_block().await?;
+//     let (payload, _) = ctx.node.advance_block().await?;
 
-    assert_eq!(payload.block().body.transactions.len(), pbh_tx_hashes.len());
-    let block_hash = payload.block().hash();
-    let block_number = payload.block().number;
+//     assert_eq!(payload.block().body.transactions.len(), pbh_tx_hashes.len());
+//     let block_hash = payload.block().hash();
+//     let block_number = payload.block().number;
 
-    let tip = pbh_tx_hashes[0];
-    ctx.node
-        .assert_new_block(tip, block_hash, block_number)
-        .await?;
+//     let tip = pbh_tx_hashes[0];
+//     ctx.node
+//         .assert_new_block(tip, block_hash, block_number)
+//         .await?;
 
-    Ok(())
-}
+//     Ok(())
+// }
 
-#[tokio::test]
-#[serial]
-async fn test_transaction_pool_ordering() -> eyre::Result<()> {
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    let mut ctx = WorldChainBuilderTestContext::setup().await?;
-    let non_pbh_tx = tx(ctx.node.inner.chain_spec().chain.id(), None, 0);
-    let wallet = ctx.pbh_wallets[0].clone();
-    let signer = EthereumWallet::from(wallet);
-    let signed = <TransactionRequest as TransactionBuilder<Ethereum>>::build(non_pbh_tx, &signer)
-        .await
-        .unwrap();
-    let non_pbh_hash = ctx.node.rpc.inject_tx(signed.encoded_2718().into()).await?;
-    let mut pbh_tx_hashes = vec![];
-    for signer in ctx.pbh_wallets.iter().skip(1) {
-        let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
-        let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
-        pbh_tx_hashes.push(pbh_hash);
-    }
+// #[tokio::test]
+// #[serial]
+// async fn test_transaction_pool_ordering() -> eyre::Result<()> {
+//     tokio::time::sleep(Duration::from_secs(1)).await;
+//     let mut ctx = WorldChainBuilderTestContext::setup().await?;
+//     let non_pbh_tx = tx(ctx.node.inner.chain_spec().chain.id(), None, 0);
+//     let wallet = ctx.pbh_wallets[0].clone();
+//     let signer = EthereumWallet::from(wallet);
+//     let signed = <TransactionRequest as TransactionBuilder<Ethereum>>::build(non_pbh_tx, &signer)
+//         .await
+//         .unwrap();
+//     let non_pbh_hash = ctx.node.rpc.inject_tx(signed.encoded_2718().into()).await?;
+//     let mut pbh_tx_hashes = vec![];
+//     for signer in ctx.pbh_wallets.iter().skip(1) {
+//         let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
+//         let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
+//         pbh_tx_hashes.push(pbh_hash);
+//     }
 
-    let (payload, _) = ctx.node.advance_block().await?;
+//     let (payload, _) = ctx.node.advance_block().await?;
 
-    assert_eq!(
-        payload.block().body.transactions.len(),
-        pbh_tx_hashes.len() + 1
-    );
-    // Assert the non-pbh transaction is included in the block last
-    assert_eq!(
-        payload.block().body.transactions.last().unwrap().hash(),
-        non_pbh_hash
-    );
-    let block_hash = payload.block().hash();
-    let block_number = payload.block().number;
+//     assert_eq!(
+//         payload.block().body.transactions.len(),
+//         pbh_tx_hashes.len() + 1
+//     );
+//     // Assert the non-pbh transaction is included in the block last
+//     assert_eq!(
+//         payload.block().body.transactions.last().unwrap().hash(),
+//         non_pbh_hash
+//     );
+//     let block_hash = payload.block().hash();
+//     let block_number = payload.block().number;
 
-    let tip = pbh_tx_hashes[0];
-    ctx.node
-        .assert_new_block(tip, block_hash, block_number)
-        .await?;
+//     let tip = pbh_tx_hashes[0];
+//     ctx.node
+//         .assert_new_block(tip, block_hash, block_number)
+//         .await?;
 
-    Ok(())
-}
+//     Ok(())
+// }
 
-#[tokio::test]
-#[serial]
-async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    let ctx = WorldChainBuilderTestContext::setup().await?;
-    let signer = ctx.pbh_wallets[0].clone();
-    let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
-    ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
-    let dup_pbh_hash_res = ctx.node.rpc.inject_tx(raw_tx.clone()).await;
-    assert!(dup_pbh_hash_res.is_err());
-    Ok(())
-}
+// #[tokio::test]
+// #[serial]
+// async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
+//     tokio::time::sleep(Duration::from_secs(1)).await;
+//     let ctx = WorldChainBuilderTestContext::setup().await?;
+//     let signer = ctx.pbh_wallets[0].clone();
+//     let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
+//     ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
+//     let dup_pbh_hash_res = ctx.node.rpc.inject_tx(raw_tx.clone()).await;
+//     assert!(dup_pbh_hash_res.is_err());
+//     Ok(())
+// }
 
-#[tokio::test]
-#[serial]
-async fn test_dup_pbh_nonce() -> eyre::Result<()> {
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    let mut ctx = WorldChainBuilderTestContext::setup().await?;
-    let signer = ctx.pbh_wallets[0].clone();
+// #[tokio::test]
+// #[serial]
+// async fn test_dup_pbh_nonce() -> eyre::Result<()> {
+//     tokio::time::sleep(Duration::from_secs(1)).await;
+//     let mut ctx = WorldChainBuilderTestContext::setup().await?;
+//     let signer = ctx.pbh_wallets[0].clone();
 
-    let raw_tx_0 = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
-    ctx.node.rpc.inject_tx(raw_tx_0.clone()).await?;
-    let raw_tx_1 = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 1).await;
+//     let raw_tx_0 = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
+//     ctx.node.rpc.inject_tx(raw_tx_0.clone()).await?;
+//     let raw_tx_1 = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 1).await;
 
-    // Now that the nullifier has successfully been stored in
-    // the `ExecutedPbhNullifierTable`, inserting a new tx with the
-    // same pbh_nonce should fail to validate.
-    assert!(ctx.node.rpc.inject_tx(raw_tx_1.clone()).await.is_err());
+//     // Now that the nullifier has successfully been stored in
+//     // the `ExecutedPbhNullifierTable`, inserting a new tx with the
+//     // same pbh_nonce should fail to validate.
+//     assert!(ctx.node.rpc.inject_tx(raw_tx_1.clone()).await.is_err());
 
-    let (payload, _) = ctx.node.advance_block().await?;
+//     let (payload, _) = ctx.node.advance_block().await?;
 
-    // One transaction should be successfully validated
-    // and included in the block.
-    assert_eq!(payload.block().body.transactions.len(), 1);
+//     // One transaction should be successfully validated
+//     // and included in the block.
+//     assert_eq!(payload.block().body.transactions.len(), 1);
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 /// Helper function to create a new eth payload attributes
 pub fn optimism_payload_attributes(timestamp: u64) -> OptimismPayloadBuilderAttributes {

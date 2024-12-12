@@ -155,6 +155,7 @@ pub fn recover_raw_transaction(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Transaction;
     use alloy_primitives::{address, hex};
 
     #[test]
