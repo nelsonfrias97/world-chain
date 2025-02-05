@@ -40,12 +40,14 @@ use reth_provider::{
 };
 use reth_transaction_pool::error::InvalidPoolTransactionError;
 use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
-use revm::Database;
+use revm::{Database, EvmBuilder};
 use revm_primitives::{Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
 use world_chain_builder_rpc::transactions::validate_conditional_options;
+
+use crate::inspector::PBHCallTracer;
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]
@@ -742,10 +744,11 @@ where
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
         let base_fee = self.base_fee();
 
-        let mut evm = self
-            .inner
-            .evm_config
-            .evm_with_env(&mut *db, self.inner.evm_env.clone());
+        let mut evm = self.inner.evm_config.evm_with_env_and_inspector(
+            &mut *db,
+            self.inner.evm_env.clone(),
+            PBHCallTracer::new(),
+        );
 
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
