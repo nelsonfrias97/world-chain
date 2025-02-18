@@ -115,6 +115,7 @@ alloy-genesis = { version = "0.11.1", default-features = false }
 alloy-rpc-types-debug = "0.11.1"
 alloy-signer = { version = "0.11.1", default-features = false }
 alloy-signer-local = { version = "0.11.1", default-features = false }
+alloy-signer-aws = { version = "0.11.1", default-features = false }
 alloy-sol-types = "0.8.18"
 
 # revm
@@ -126,6 +127,8 @@ jsonrpsee = { version = "0.24", features = ["server", "client", "macros"] }
 jsonrpsee-types = "0.24"
 
 # 3rd party
+aws-config = { version = "1.5.6", default-features = false, features = ["rt-tokio", "rustls"] }
+aws-sdk-kms = { version = "1.44", default-features = false }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 chrono = "0.4"

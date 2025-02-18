@@ -92,6 +92,8 @@ impl WorldChainNode {
             pbh_entrypoint,
             signature_aggregator,
             world_id,
+            private_key,
+            aws_kms_key_id,
         } = self.args.clone();
 
         let RollupArgs {
@@ -317,6 +319,7 @@ pub struct WorldChainPayloadBuilder<Txs = ()> {
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
+    pub(crate) pbh_signer: PbhSigner,
 }
 
 impl WorldChainPayloadBuilder {
@@ -327,6 +330,7 @@ impl WorldChainPayloadBuilder {
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
+        pbh_signer: PbhSigner,
     ) -> Self {
         Self {
             compute_pending_block,
@@ -335,6 +339,7 @@ impl WorldChainPayloadBuilder {
             pbh_signature_aggregator,
             best_transactions: (),
             da_config: OpDAConfig::default(),
+            pbh_signer
         }
     }
 
@@ -402,6 +407,7 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
                 self.verified_blockspace_capacity,
                 self.pbh_entry_point,
                 self.pbh_signature_aggregator,
+                self.pbh_signer
             )
             .with_transactions(self.best_transactions.clone());
 

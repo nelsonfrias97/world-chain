@@ -53,6 +53,7 @@ use world_chain_builder_pool::WorldChainTransactionPool;
 use world_chain_builder_rpc::api_ext::validate_conditional_options;
 
 use crate::inspector::{PBHCallTracer, PBH_CALL_TRACER_ERROR};
+use crate::signer::PbhSigner;
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]
@@ -67,6 +68,7 @@ where
         OpPrimitives,
         Txs,
     >,
+    pub(crate) pbh_signer: PbhSigner,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
@@ -86,6 +88,7 @@ where
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
+        pbh_signer: PbhSigner,
     ) -> Self {
         Self::with_builder_config(
             pool,
@@ -97,6 +100,7 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            pbh_signer,
         )
     }
 
@@ -111,6 +115,7 @@ where
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
+        pbh_signer: PbhSigner,
     ) -> Self {
         let inner = OpPayloadBuilder::with_builder_config(
             pool,
@@ -126,6 +131,7 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            pbh_signer,
         }
     }
 }
@@ -149,6 +155,7 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            pbh_signer,
         } = self;
 
         let OpPayloadBuilder {
@@ -174,6 +181,7 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            pbh_signer,
         }
     }
 
@@ -243,6 +251,7 @@ where
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
+            pbh_signer: self.pbh_signer.clone(),
         };
 
         let op_ctx = &ctx.inner;
@@ -315,6 +324,7 @@ where
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
+            pbh_signer: self.pbh_signer.clone(),
         };
 
         let state_provider = self
@@ -688,6 +698,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
 #[derive(Debug)]
 pub struct WorldChainPayloadBuilderCtx<Client> {
     pub inner: OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec, OpPrimitives>,
+    pub(crate) pbh_signer: PbhSigner,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,

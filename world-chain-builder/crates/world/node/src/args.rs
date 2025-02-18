@@ -1,13 +1,25 @@
 use alloy_primitives::Address;
-use clap::value_parser;
+use clap::{value_parser, ArgGroup};
 use reth_optimism_node::args::RollupArgs;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
 #[command(next_help_heading = "PBH Builder")]
+#[clap(group(ArgGroup::new("builder_private_key").required(true).multiple(false).args(&[
+    "private_key",
+    "aws_kms_key_id"])))
+]
 pub struct WorldChainArgs {
     /// op rollup args
     #[command(flatten)]
     pub rollup_args: RollupArgs,
+
+    /// Sets the private key for the builder
+    #[arg(long = "builder.private_key", env)]
+    pub private_key: Option<String>,
+
+    /// AWS KMS key ID to use for signing transactions
+    #[arg(long = "builder.aws_kms_key_id", env)]
+    pub aws_kms_key_id: Option<String>,
 
     /// Sets the number of allowed PBH transactions per month
     #[arg(long = "builder.num_pbh_txs", default_value = "30")]
