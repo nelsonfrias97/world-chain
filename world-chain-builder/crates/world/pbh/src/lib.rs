@@ -6,6 +6,7 @@ pub mod external_nullifier;
 use crate::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
 use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use external_nullifier::EncodedExternalNullifier;
 use semaphore::packed_proof::PackedProof;
 use semaphore::protocol::{verify_proof, ProofError};
 use semaphore::Field;
@@ -51,9 +52,7 @@ impl PBHSidecar {
     pub fn nullifier_hashes(&self) -> Vec<&Field> {
         match self {
             PBHSidecar::PBHPayload(payload) => vec![&payload.nullifier_hash],
-            PBHSidecar::PBHBundle(payloads) => {
-                payloads.iter().map(|p| &p.nullifier_hash).collect()
-            }
+            PBHSidecar::PBHBundle(payloads) => payloads.iter().map(|p| &p.nullifier_hash).collect(),
         }
     }
 }
@@ -95,7 +94,7 @@ impl PBHPayload {
             self.root,
             self.nullifier_hash,
             signal,
-            self.external_nullifier.to_word(),
+            EncodedExternalNullifier::from(self.external_nullifier).0,
             &self.proof.0,
             TREE_DEPTH,
         )? {

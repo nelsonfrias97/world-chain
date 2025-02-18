@@ -61,7 +61,8 @@ impl Encodable2718 for WorldChainTxEnvelope {
 impl Decodable2718 for WorldChainTxEnvelope {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
         if ty == PBH_TX_TYPE {
-            let inner = op_alloy_consensus::OpPooledTransaction::decode(buf)?;
+            // TODO: Figure out how to properly handle OP RLP decoding here
+            let inner = op_alloy_consensus::OpPooledTransaction::fallback_decode(buf)?;
             match PBHSidecar::decode(buf) {
                 Ok(pbh_sidecar) => Ok(Self {
                     inner,

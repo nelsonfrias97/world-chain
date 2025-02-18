@@ -2,12 +2,13 @@
 use super::root::WorldChainRootValidator;
 use super::tx::WorldChainPoolTransaction;
 use crate::bindings::IPBHEntryPoint;
+use crate::bindings::IPBHEntryPoint::PBHPayload as IPBHPayload;
 use crate::tx::WorldChainPoolTransactionError;
 use alloy_primitives::Address;
 use alloy_primitives::U256;
-use alloy_rlp::Decodable;
 use alloy_sol_types::{SolCall, SolValue};
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth::transaction_pool::validate::ValidTransaction;
 use reth::transaction_pool::{
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
@@ -18,6 +19,7 @@ use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use semaphore::hash_to_field;
+
 use world_chain_builder_pbh::{PBHPayload, PBHSidecar};
 
 /// Validator for World Chain transactions.
@@ -98,10 +100,7 @@ where
         tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         // Ensure that the tx is a valid OP transaction and return early if invalid
-        let mut tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
-            valid @ TransactionValidationOutcome::Valid { .. } => valid,
-            other => return other,
-        };
+        let mut tx_outcome = self.inner.validate_one(origin, tx.clone());
 
         // Decode the calldata and check that all UserOp specify the PBH signature aggregator
         let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
@@ -120,8 +119,8 @@ where
         // Validate all proofs associated with each UserOp
         let mut pbh_bundle = vec![];
         for aggregated_ops in calldata._0 {
-            let mut buff = aggregated_ops.signature.as_ref();
-            let pbh_payloads = match <Vec<PBHPayload>>::decode(&mut buff) {
+            let buff = aggregated_ops.signature.as_ref();
+            let pbh_payloads = match <Vec<IPBHPayload>>::abi_decode(buff, true) {
                 Ok(pbh_payloads) => pbh_payloads,
                 Err(_) => return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx),
             };
@@ -131,21 +130,23 @@ where
             }
 
             let valid_roots = self.root_validator.roots();
+
             if let Err(err) = pbh_payloads
                 .par_iter()
                 .zip(aggregated_ops.userOps)
                 .try_for_each(|(payload, op)| {
                     let signal = crate::eip4337::hash_user_op(&op);
-
+                    let Ok(payload) = PBHPayload::try_from(payload.clone()) else {
+                        return Err(WorldChainPoolTransactionError::InvalidCalldata);
+                    };
                     payload.validate(signal, &valid_roots, self.num_pbh_txs)?;
-
                     Ok::<(), WorldChainPoolTransactionError>(())
                 })
             {
                 return err.to_outcome(tx);
             }
 
-            pbh_bundle.extend(pbh_payloads);
+            pbh_bundle.extend(pbh_payloads.into_iter().map(PBHPayload::try_from).flatten());
         }
 
         if let TransactionValidationOutcome::Valid {
@@ -168,17 +169,17 @@ where
         tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         // Ensure that the tx is a valid OP transaction and return early if invalid
-        let mut tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
-            valid @ TransactionValidationOutcome::Valid { .. } => valid,
-            other => return other,
-        };
+        let mut tx_outcome = self.inner.validate_one(origin, tx.clone());
 
         // Decode the calldata and extract the PBH payload
         let Ok(calldata) = IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) else {
             return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
         };
 
-        let pbh_payload: PBHPayload = calldata.payload.into();
+        let Ok(pbh_payload) = PBHPayload::try_from(calldata.payload) else {
+            return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
+        };
+
         let signal_hash: alloy_primitives::Uint<256, 4> =
             hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
 
@@ -277,14 +278,16 @@ pub mod tests {
     use reth_primitives::{BlockBody, SealedBlock};
     use world_chain_builder_pbh::date_marker::DateMarker;
     use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+    use world_chain_builder_test_utils::utils::{
+        account, eip1559, eth_tx, pbh_bundle, pbh_multicall, user_op, TREE,
+    };
+    use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
 
     use super::WorldChainTransactionValidator;
     use crate::mock::{ExtendedAccount, MockEthProvider};
     use crate::ordering::WorldChainOrdering;
     use crate::root::LATEST_ROOT_SLOT;
-    use crate::test_utils::{
-        self, world_chain_validator, PBH_TEST_ENTRYPOINT, TEST_WORLD_ID, TREE,
-    };
+    use crate::test_utils::world_chain_validator;
     use crate::tx::WorldChainPooledTransaction;
 
     async fn setup() -> Pool<
@@ -296,7 +299,7 @@ pub mod tests {
 
         // Fund 10 test accounts
         for acc in 0..10 {
-            let account_address = test_utils::account(acc);
+            let account_address = account(acc);
 
             validator.inner.client().add_account(
                 account_address,
@@ -309,7 +312,7 @@ pub mod tests {
 
         // Insert a world id root into the OpWorldId Account
         validator.inner.client().add_account(
-            TEST_WORLD_ID,
+            DEV_WORLD_ID,
             ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), root)]),
         );
@@ -339,9 +342,9 @@ pub mod tests {
 
         let pool = setup().await;
 
-        let account = test_utils::account(ACC);
-        let tx = test_utils::eip1559().to(account).call();
-        let tx = test_utils::eth_tx(ACC, tx).await;
+        let account = account(ACC);
+        let tx = eip1559().to(account).call();
+        let tx = eth_tx(ACC, tx).await;
 
         pool.add_external_transaction(tx.into())
             .await
@@ -354,9 +357,9 @@ pub mod tests {
 
         let pool = setup().await;
 
-        let account = test_utils::account(ACC);
-        let tx = test_utils::eip1559().to(account).call();
-        let tx = test_utils::eth_tx(ACC, tx).await;
+        let account = account(ACC);
+        let tx = eip1559().to(account).call();
+        let tx = eth_tx(ACC, tx).await;
 
         pool.add_external_transaction(tx.clone().into())
             .await
@@ -374,22 +377,19 @@ pub mod tests {
 
         let pool = setup().await;
 
-        let (user_op, proof) = test_utils::user_op()
+        let (user_op, proof) = user_op()
             .acc(USER_ACCOUNT)
             .external_nullifier(ExternalNullifier::with_date_marker(
                 DateMarker::from(chrono::Utc::now()),
                 0,
             ))
             .call();
-        let bundle = test_utils::pbh_bundle(vec![user_op], vec![proof]);
+        let bundle = pbh_bundle(vec![user_op], vec![proof.into()]);
         let calldata = bundle.abi_encode();
 
-        let tx = test_utils::eip1559()
-            .to(PBH_TEST_ENTRYPOINT)
-            .input(calldata)
-            .call();
+        let tx = eip1559().to(PBH_DEV_ENTRYPOINT).input(calldata).call();
 
-        let tx = test_utils::eth_tx(BUNDLER_ACCOUNT, tx).await;
+        let tx = eth_tx(BUNDLER_ACCOUNT, tx).await;
 
         pool.add_external_transaction(tx.clone().into())
             .await
@@ -405,7 +405,7 @@ pub mod tests {
         let pool = setup().await;
 
         // NOTE: We're ignoring the proof here
-        let (user_op, _proof) = test_utils::user_op()
+        let (user_op, _proof) = user_op()
             .acc(USER_ACCOUNT)
             .external_nullifier(ExternalNullifier::with_date_marker(
                 DateMarker::from(chrono::Utc::now()),
@@ -413,17 +413,17 @@ pub mod tests {
             ))
             .call();
 
-        let bundle = test_utils::pbh_bundle(vec![user_op], vec![]);
+        let bundle = pbh_bundle(vec![user_op], vec![]);
 
         let calldata = bundle.abi_encode();
 
-        let tx = test_utils::eip1559()
+        let tx = eip1559()
             // NOTE: Random receiving account
             .to(rng.gen::<Address>())
             .input(calldata)
             .call();
 
-        let tx = test_utils::eth_tx(USER_ACCOUNT, tx).await;
+        let tx = eth_tx(USER_ACCOUNT, tx).await;
 
         pool.add_external_transaction(tx.clone().into())
             .await
@@ -440,7 +440,7 @@ pub mod tests {
         let pool = setup().await;
 
         // NOTE: We're ignoring the proof here
-        let (user_op, _proof) = test_utils::user_op()
+        let (user_op, _proof) = user_op()
             .acc(USER_ACCOUNT)
             .external_nullifier(ExternalNullifier::with_date_marker(
                 DateMarker::from(chrono::Utc::now()),
@@ -448,16 +448,13 @@ pub mod tests {
             ))
             .call();
 
-        let bundle = test_utils::pbh_bundle(vec![user_op], vec![]);
+        let bundle = pbh_bundle(vec![user_op], vec![]);
 
         let calldata = bundle.abi_encode();
 
-        let tx = test_utils::eip1559()
-            .to(PBH_TEST_ENTRYPOINT)
-            .input(calldata)
-            .call();
+        let tx = eip1559().to(PBH_DEV_ENTRYPOINT).input(calldata).call();
 
-        let tx = test_utils::eth_tx(BUNDLER_ACCOUNT, tx).await;
+        let tx = eth_tx(BUNDLER_ACCOUNT, tx).await;
 
         let err = pool
             .add_external_transaction(tx.clone().into())
@@ -473,7 +470,7 @@ pub mod tests {
 
         let pool = setup().await;
 
-        let calldata = test_utils::pbh_multicall()
+        let calldata = pbh_multicall()
             .acc(USER_ACCOUNT)
             .external_nullifier(ExternalNullifier::with_date_marker(
                 DateMarker::from(chrono::Utc::now()),
@@ -482,12 +479,9 @@ pub mod tests {
             .call();
         let calldata = calldata.abi_encode();
 
-        let tx = test_utils::eip1559()
-            .to(PBH_TEST_ENTRYPOINT)
-            .input(calldata)
-            .call();
+        let tx = eip1559().to(PBH_DEV_ENTRYPOINT).input(calldata).call();
 
-        let tx = test_utils::eth_tx(USER_ACCOUNT, tx).await;
+        let tx = eth_tx(USER_ACCOUNT, tx).await;
 
         pool.add_external_transaction(tx.clone().into())
             .await
@@ -505,7 +499,7 @@ pub mod tests {
         let month_in_the_past = now - chrono::Months::new(1);
 
         // NOTE: We're ignoring the proof here
-        let (user_op, proof) = test_utils::user_op()
+        let (user_op, proof) = user_op()
             .acc(USER_ACCOUNT)
             .external_nullifier(ExternalNullifier::with_date_marker(
                 DateMarker::from(month_in_the_past),
@@ -513,16 +507,13 @@ pub mod tests {
             ))
             .call();
 
-        let bundle = test_utils::pbh_bundle(vec![user_op], vec![proof]);
+        let bundle = pbh_bundle(vec![user_op], vec![proof.into()]);
 
         let calldata = bundle.abi_encode();
 
-        let tx = test_utils::eip1559()
-            .to(PBH_TEST_ENTRYPOINT)
-            .input(calldata)
-            .call();
+        let tx = eip1559().to(PBH_DEV_ENTRYPOINT).input(calldata).call();
 
-        let tx = test_utils::eth_tx(BUNDLER_ACCOUNT, tx).await;
+        let tx = eth_tx(BUNDLER_ACCOUNT, tx).await;
 
         let err = pool
             .add_external_transaction(tx.clone().into())
@@ -544,7 +535,7 @@ pub mod tests {
         let month_in_the_future = now + chrono::Months::new(1);
 
         // NOTE: We're ignoring the proof here
-        let (user_op, proof) = test_utils::user_op()
+        let (user_op, proof) = user_op()
             .acc(USER_ACCOUNT)
             .external_nullifier(ExternalNullifier::with_date_marker(
                 DateMarker::from(month_in_the_future),
@@ -552,16 +543,13 @@ pub mod tests {
             ))
             .call();
 
-        let bundle = test_utils::pbh_bundle(vec![user_op], vec![proof]);
+        let bundle = pbh_bundle(vec![user_op], vec![proof.into()]);
 
         let calldata = bundle.abi_encode();
 
-        let tx = test_utils::eip1559()
-            .to(PBH_TEST_ENTRYPOINT)
-            .input(calldata)
-            .call();
+        let tx = eip1559().to(PBH_DEV_ENTRYPOINT).input(calldata).call();
 
-        let tx = test_utils::eth_tx(BUNDLER_ACCOUNT, tx).await;
+        let tx = eth_tx(BUNDLER_ACCOUNT, tx).await;
 
         let err = pool
             .add_external_transaction(tx.clone().into())
@@ -580,7 +568,7 @@ pub mod tests {
 
         let pool = setup().await;
 
-        let (user_op, proof) = test_utils::user_op()
+        let (user_op, proof) = user_op()
             .acc(USER_ACCOUNT)
             .external_nullifier(ExternalNullifier::with_date_marker(
                 DateMarker::from(chrono::Utc::now()),
@@ -588,16 +576,13 @@ pub mod tests {
             ))
             .call();
 
-        let bundle = test_utils::pbh_bundle(vec![user_op], vec![proof]);
+        let bundle = pbh_bundle(vec![user_op], vec![proof.into()]);
 
         let calldata = bundle.abi_encode();
 
-        let tx = test_utils::eip1559()
-            .to(PBH_TEST_ENTRYPOINT)
-            .input(calldata)
-            .call();
+        let tx = eip1559().to(PBH_DEV_ENTRYPOINT).input(calldata).call();
 
-        let tx = test_utils::eth_tx(BUNDLER_ACCOUNT, tx).await;
+        let tx = eth_tx(BUNDLER_ACCOUNT, tx).await;
 
         let err = pool
             .add_external_transaction(tx.clone().into())

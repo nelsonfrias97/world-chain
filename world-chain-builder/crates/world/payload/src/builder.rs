@@ -76,6 +76,7 @@ impl<Client, S> WorldChainPayloadBuilder<Client, S>
 where
     Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: WorldChainTransactionPool<Client, S>,
         client: Client,
@@ -99,6 +100,7 @@ where
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_builder_config(
         pool: WorldChainTransactionPool<Client, S>,
         client: Client,
@@ -777,9 +779,7 @@ where
                     continue;
                 }
             } else {
-                let signer = PrivateKeySigner::random();
                 // TODO: System transaction to back run PBH blockspace with all nullifier hashes in the PBH Sidecars
-
             }
 
             // ensure we still have capacity for this transaction
