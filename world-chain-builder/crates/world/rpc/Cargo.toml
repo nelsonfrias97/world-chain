@@ -20,7 +20,6 @@ reth-provider.workspace = true
 revm-primitives.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-node.workspace = true
-reth-optimism-primitives.workspace = true
 
 alloy-consensus.workspace = true
 alloy-eips.workspace = true

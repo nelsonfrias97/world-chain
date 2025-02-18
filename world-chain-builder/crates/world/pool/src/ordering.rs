@@ -16,7 +16,7 @@ pub struct WorldChainOrdering<T> {
 /// The ordering of fields here is important.
 #[derive(Debug, Default, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct WorldChainPriority {
-    is_pbh: bool,
+    pbh: bool,
     effective_tip_per_gas: Option<U256>,
 }
 
@@ -35,7 +35,7 @@ where
         let effective_tip_per_gas = transaction.effective_tip_per_gas(base_fee).map(U256::from);
 
         Some(WorldChainPriority {
-            is_pbh: transaction.pbh_sidecar().is_some(),
+            pbh: transaction.pbh_sidecar().is_some(),
             effective_tip_per_gas,
         })
         .into()
@@ -67,12 +67,12 @@ mod test {
     #[test]
     fn pbh_has_priority() {
         let pbh = WorldChainPriority {
-            is_pbh: true,
+            pbh: true,
             effective_tip_per_gas: Some(U256::from(100u64)),
         };
 
         let no_pbh = WorldChainPriority {
-            is_pbh: false,
+            pbh: false,
             effective_tip_per_gas: Some(U256::from(10000u64)),
         };
 
@@ -81,14 +81,14 @@ mod test {
 
     #[test_case(true)]
     #[test_case(false)]
-    fn higher_tip_has_priority(is_pbh: bool) {
+    fn higher_tip_has_priority(pbh: bool) {
         let lower_tip = WorldChainPriority {
-            is_pbh,
+            pbh,
             effective_tip_per_gas: Some(U256::from(100u64)),
         };
 
         let higher_tip = WorldChainPriority {
-            is_pbh,
+            pbh,
             effective_tip_per_gas: Some(U256::from(10000u64)),
         };
 

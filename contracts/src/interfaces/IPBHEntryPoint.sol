@@ -32,7 +32,8 @@ interface IPBHEntryPoint {
         IEntryPoint entryPoint,
         uint8 _numPbhPerMonth,
         address _multicall3,
-        uint256 _multicallGasLimit
+        uint256 _multicallGasLimit,
+        address[] calldata _builders
     ) external;
 
     function validateSignaturesCallback(bytes32 hashedOps) external view;

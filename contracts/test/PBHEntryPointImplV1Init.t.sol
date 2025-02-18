@@ -21,6 +21,7 @@ import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 contract PBHEntryPointImplV1InitTest is Test {
     IPBHEntryPoint uninitializedPBHEntryPoint;
     uint256 public constant MAX_PBH_GAS_LIMIT = 10000000;
+    address[] public builders = new address[](0);
 
     function setUp() public {
         address pbhEntryPointImpl = address(new PBHEntryPointImplV1());
@@ -32,11 +33,14 @@ contract PBHEntryPointImplV1InitTest is Test {
         vm.assume(numPbh > 0);
 
         address pbhEntryPointImpl = address(new PBHEntryPointImplV1());
-        bytes memory initCallData =
-            abi.encodeCall(PBHEntryPointImplV1.initialize, (worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT));
+        bytes memory initCallData = abi.encodeCall(
+            PBHEntryPointImplV1.initialize, (worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT, builders)
+        );
 
         vm.expectEmit(true, true, true, true);
-        emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT);
+        emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(
+            worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT, builders
+        );
         IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
     }
 
@@ -50,14 +54,16 @@ contract PBHEntryPointImplV1InitTest is Test {
 
         // Expect revert when entrypoint is address(0)
         bytes memory initCallData = abi.encodeCall(
-            PBHEntryPointImplV1.initialize, (worldId, IEntryPoint(address(0)), numPbh, multicall, MAX_PBH_GAS_LIMIT)
+            PBHEntryPointImplV1.initialize,
+            (worldId, IEntryPoint(address(0)), numPbh, multicall, MAX_PBH_GAS_LIMIT, builders)
         );
         vm.expectRevert(PBHEntryPointImplV1.AddressZero.selector);
         IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
 
         // Expect revert when multicall3 is address(0)
-        initCallData =
-            abi.encodeCall(PBHEntryPointImplV1.initialize, (worldId, entryPoint, numPbh, address(0), MAX_PBH_GAS_LIMIT));
+        initCallData = abi.encodeCall(
+            PBHEntryPointImplV1.initialize, (worldId, entryPoint, numPbh, address(0), MAX_PBH_GAS_LIMIT, builders)
+        );
         vm.expectRevert(PBHEntryPointImplV1.AddressZero.selector);
         IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
     }
@@ -70,8 +76,9 @@ contract PBHEntryPointImplV1InitTest is Test {
 
         address pbhEntryPointImpl = address(new PBHEntryPointImplV1());
 
-        bytes memory initCallData =
-            abi.encodeCall(PBHEntryPointImplV1.initialize, (worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT));
+        bytes memory initCallData = abi.encodeCall(
+            PBHEntryPointImplV1.initialize, (worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT, builders)
+        );
         vm.expectRevert(PBHEntryPointImplV1.InvalidNumPbhPerMonth.selector);
         IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
     }
@@ -83,15 +90,18 @@ contract PBHEntryPointImplV1InitTest is Test {
         address multicall = address(3);
 
         address pbhEntryPointImpl = address(new PBHEntryPointImplV1());
-        bytes memory initCallData =
-            abi.encodeCall(PBHEntryPointImplV1.initialize, (worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT));
+        bytes memory initCallData = abi.encodeCall(
+            PBHEntryPointImplV1.initialize, (worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT, builders)
+        );
 
         vm.expectEmit(true, true, true, true);
-        emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT);
+        emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(
+            worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT, builders
+        );
         IPBHEntryPoint pbhEntryPoint = IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
 
         vm.expectRevert("Initializable: contract is already initialized");
-        pbhEntryPoint.initialize(worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT);
+        pbhEntryPoint.initialize(worldId, entryPoint, numPbh, multicall, MAX_PBH_GAS_LIMIT, builders);
     }
 
     function test_verifyPbh_RevertIf_Uninitialized() public {

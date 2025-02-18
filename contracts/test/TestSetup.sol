@@ -36,6 +36,9 @@ contract TestSetup is Test {
 
     string internal constant MAINNET_RPC_URL = "https://eth.llamarpc.com";
 
+    /// @notice The list of authorized block builders.
+    address[] public builders = new address[](0);
+
     /// @notice The 4337 Entry Point.
     IEntryPoint internal entryPoint;
     /// @notice The PBHEntryPoint contract.
@@ -126,11 +129,11 @@ contract TestSetup is Test {
 
         bytes memory initCallData = abi.encodeCall(
             PBHEntryPointImplV1.initialize,
-            (initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, maxPbhGasLimit)
+            (initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, maxPbhGasLimit, builders)
         );
         vm.expectEmit(true, true, true, true);
         emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(
-            initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, maxPbhGasLimit
+            initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, maxPbhGasLimit, builders
         );
         pbhEntryPoint = IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
     }

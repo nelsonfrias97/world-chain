@@ -22,12 +22,37 @@ pub enum PBHSidecar {
     PBHBundle(Vec<PBHPayload>),
 }
 
-impl PBHSidecar {
-    pub fn external_nullifiers(&self) -> Vec<&ExternalNullifier> {
+impl Encodable for PBHSidecar {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         match self {
-            PBHSidecar::PBHPayload(payload) => vec![&payload.external_nullifier],
+            PBHSidecar::PBHPayload(payload) => payload.encode(out),
+            PBHSidecar::PBHBundle(payloads) => payloads.encode(out),
+        }
+    }
+
+    fn length(&self) -> usize {
+        match self {
+            PBHSidecar::PBHPayload(payload) => payload.length(),
+            PBHSidecar::PBHBundle(payloads) => payloads.length(),
+        }
+    }
+}
+
+impl Decodable for PBHSidecar {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        if let Ok(payloads) = Vec::<PBHPayload>::decode(buf) {
+            return Ok(PBHSidecar::PBHBundle(payloads));
+        }
+        Ok(PBHSidecar::PBHPayload(PBHPayload::decode(buf)?))
+    }
+}
+
+impl PBHSidecar {
+    pub fn nullifier_hashes(&self) -> Vec<&Field> {
+        match self {
+            PBHSidecar::PBHPayload(payload) => vec![&payload.nullifier_hash],
             PBHSidecar::PBHBundle(payloads) => {
-                payloads.iter().map(|p| &p.external_nullifier).collect()
+                payloads.iter().map(|p| &p.nullifier_hash).collect()
             }
         }
     }

@@ -41,6 +41,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @dev Whether a nullifier hash has been used already. Used to guarantee an action is only performed once by a single person
     mapping(uint256 => bool) public nullifierHashes;
 
+    /// @dev A mapping of signatories authorized to spend nullifier hashes during payload building.
+    mapping(address => bool) public authorizedBuilders;
+
     /// @notice The gas limit for a PBH multicall transaction
     uint256 public pbhGasLimit;
 
@@ -60,7 +63,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         IEntryPoint indexed entryPoint,
         uint8 indexed numPbhPerMonth,
         address multicall3,
-        uint256 pbhGasLimit
+        uint256 pbhGasLimit,
+        address[] builders
     );
 
     /// @notice Emitted once for each successful PBH verification.
@@ -84,6 +88,22 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     ///
     /// @param pbhGasLimit The gas limit for a PBH multicall transaction.
     event PBHGasLimitSet(uint256 indexed pbhGasLimit);
+
+    /// @notice Emitted when a builder is authorized.
+    ///
+    /// @param builder The address of the builder to authorize.
+    event BuilderAuthorized(address indexed builder);
+
+    /// @notice Emitted when a builder is deauthorized.
+    ///
+    /// @param builder The address of the builder to deauthorize.
+    event BuilderDeauthorized(address indexed builder);
+
+    //// @notice Emitted when a builder spends nullifier hashes.
+    ///
+    /// @param builder The address of the builder spending the nullifier hashes.
+    /// @param nullifierHashes The nullifier hashes spent.
+    event NullifierHashesSpent(address indexed builder, uint256[] nullifierHashes);
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  ERRORS                                ///
@@ -113,6 +133,18 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @notice Thrown when the length of PBHPayloads on the aggregated signature is not equivalent to the amount of UserOperations.
     error InvalidAggregatedSignature(uint256 payloadsLength, uint256 userOpsLength);
 
+    /// @notice Thrown when an unauthorized builder attempts to build a PBH payload.
+    error UnauthorizedBuilder();
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                               MODIFIERS                                 ///
+    //////////////////////////////////////////////////////////////////////////////
+
+    modifier onlyBuilder() {
+        require(authorizedBuilders[msg.sender], UnauthorizedBuilder());
+        _;
+    }
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                               FUNCTIONS                                 ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -140,6 +172,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @param _numPbhPerMonth The number of allowed PBH transactions per month.
     /// @param multicall3 Address of the Multicall3 implementation.
     /// @param _pbhGasLimit The gas limit for a PBH multicall transaction.
+    /// @param builders The addresses of the builders to authorize.
     ///
     /// @custom:reverts string If called more than once at the same initialisation number.
     function initialize(
@@ -147,7 +180,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         IEntryPoint _entryPoint,
         uint8 _numPbhPerMonth,
         address multicall3,
-        uint256 _pbhGasLimit
+        uint256 _pbhGasLimit,
+        address[] memory builders
     ) external reinitializer(1) {
         if (address(_entryPoint) == address(0) || multicall3 == address(0)) {
             revert AddressZero();
@@ -164,6 +198,13 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         numPbhPerMonth = _numPbhPerMonth;
         _multicall3 = multicall3;
 
+        for (uint256 i = 0; i < builders.length; ++i) {
+            if (builders[i] == address(0)) {
+                revert AddressZero();
+            }
+            authorizedBuilders[builders[i]] = true;
+        }
+
         if (_pbhGasLimit == 0 || _pbhGasLimit > block.gaslimit) {
             revert InvalidPBHGasLimit(_pbhGasLimit);
         }
@@ -171,7 +212,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         pbhGasLimit = _pbhGasLimit;
         // Say that the contract is initialized.
         __setInitialized();
-        emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, multicall3, _pbhGasLimit);
+        emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, multicall3, _pbhGasLimit, builders);
     }
 
     /// @notice Verifies a PBH payload.
@@ -311,5 +352,40 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
 
         pbhGasLimit = _pbhGasLimit;
         emit PBHGasLimitSet(_pbhGasLimit);
+    }
+
+    /// @notice Initializes an authorized builder.
+    /// @param builder The address of the builder to authorize.
+    function authorizeBuilder(address builder) external virtual onlyProxy onlyInitialized onlyOwner {
+        if (builder == address(0)) {
+            revert AddressZero();
+        }
+        authorizedBuilders[builder] = true;
+
+        emit BuilderAuthorized(builder);
+    }
+
+    /// @notice Deauthorizes a builder.
+    /// @param builder The address of the builder to deauthorize.
+    function deauthorizeBuilder(address builder) external virtual onlyProxy onlyInitialized onlyOwner {
+        authorizedBuilders[builder] = false;
+
+        emit BuilderDeauthorized(builder);
+    }
+
+    /// @notice Allows a builder to spend all nullifiers within PBH blockspace.
+    /// @param _nullifierHashes The nullifier hashes to spend.
+    function spendNullifierHashes(uint256[] calldata _nullifierHashes)
+        external
+        virtual
+        onlyProxy
+        onlyInitialized
+        onlyBuilder
+    {
+        for (uint256 i = 0; i < _nullifierHashes.length; ++i) {
+            nullifierHashes[_nullifierHashes[i]] = true;
+        }
+
+        emit NullifierHashesSpent(msg.sender, _nullifierHashes);
     }
 }

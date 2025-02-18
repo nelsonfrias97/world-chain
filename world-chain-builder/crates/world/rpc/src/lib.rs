@@ -8,3 +8,5 @@ pub use api_ext::EthTransactionsExt;
 
 pub mod core;
 pub use core::{EthApiExtServer, WorldChainEthApiExt};
+
+pub mod primitives;

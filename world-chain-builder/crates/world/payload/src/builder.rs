@@ -733,7 +733,8 @@ where
 
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
-        let mut pbh_nullifiers = HashSet::new();
+        let mut pbh_nullifier_hashes = HashSet::new();
+
         while let Some(pooled_tx) = best_txs.next(()) {
             let tx = pooled_tx.clone().into_consensus();
             if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
@@ -762,21 +763,23 @@ where
 
                 // Ensure the PBHSidecar does not contain used nullifier hashes
                 let mut invalid_sidecar = false;
-                for nullifier in pbh_sidecar.external_nullifiers() {
+                for nullifier in pbh_sidecar.nullifier_hashes() {
                     // NOTE: we could also check this onchain since the state is committed after each tx,
                     // NOTE: however we still need to accumulate the nullifier hashes to post
-                    if !pbh_nullifiers.insert(nullifier.clone()) {
+                    if !pbh_nullifier_hashes.insert(nullifier.clone()) {
                         invalid_sidecar = true;
                         break;
                     }
-
-                    // TODO: check if any of the nullifiers are onchain
                 }
 
                 if invalid_sidecar {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     continue;
                 }
+            } else {
+                let signer = PrivateKeySigner::random();
+                // TODO: System transaction to back run PBH blockspace with all nullifier hashes in the PBH Sidecars
+
             }
 
             // ensure we still have capacity for this transaction
