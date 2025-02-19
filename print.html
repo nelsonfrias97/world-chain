@@ -275,10 +275,10 @@ navigation buttons found to the sides of each page.</p>
         <th style="width: 50%; border-bottom: 1px solid white;">Tx Hash</th>
         <th style="width: 50%; border-bottom: 1px solid white;">Fee</th>
       </tr>
-      <tr style="color: #33ff33;"><td>0x4444</td><td>$0.02</td></tr>
       <tr style="color: #33ff33;"><td>0x3333</td><td>$0.02</td></tr>
-      <tr style="color: #33ff33;"><td>0x6666</td><td>$0.01</td></tr>
+      <tr style="color: #33ff33;"><td>0x4444</td><td>$0.02</td></tr>
       <tr style="color: #33ff33;"><td>0x5555</td><td>$0.01</td></tr>
+      <tr style="color: #33ff33;"><td>0x6666</td><td>$0.01</td></tr>
       <tr><td>0xaaaa</td><td>$0.04</td></tr>
       <tr><td>0xbbbb</td><td>$0.04</td></tr>
       <tr><td>0xcccc</td><td>$0.03</td></tr>
@@ -466,7 +466,34 @@ During transaction validation, the World Chain Builder will validate the <code>P
     }
 </code></pre>
 <p>This callback creates a cryptographic link between the <code>PBHSignatureAggregator</code> and the <code>PBHEntryPoint</code>, and prevents the bundler from modifying the destination of the transaction without causing the bundle to revert. This guarantees a Priority UserOperation will always be included in a priority bundle, and cannot be tampered with by the bundler.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="transaction-inclusion"><a class="header" href="#transaction-inclusion">Transaction Inclusion</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="pbh-validation"><a class="header" href="#pbh-validation">PBH Validation</a></h1>
+<p>Upon receiving new transactions, the World Chain Builder will first ensure that the payload is <a href="https://github.com/paradigmxyz/reth/blob/1e965caf5fa176f244a31c0d2662ba1b590938db/crates/optimism/txpool/src/validator.rs#L136-L203">a valid OP Stack tranasaction</a>. In addition to the default checks, the builder will also evaluate transactions for PBH conditions.</p>
+<p>Any transaction that calls the <code>pbhMulticall()</code> or <code>handleAggregatedOps()</code> function on the <code>PBHEntyrPoint</code> will be considered a PBH transaction and must clear PBH Validation. PBH transactions must contain a valid <code>PBHPayload</code> or <code>PBHPayload[]</code> in the case of PBH 4337 bundles.</p>
+<pre><code class="language-solidity">    struct PBHPayload {
+        uint256 root;
+        uint256 pbhExternalNullifier;
+        uint256 nullifierHash;
+        uint256[8] proof;
+    }
+</code></pre>
+<h4 id="signal-hash-1"><a class="header" href="#signal-hash-1">Signal Hash</a></h4>
+<p>Transactions that target the <code>pbhMulticall()</code> function must provide a valid <code>PBHPayload</code> where included <code>proof</code> is generated with a <code>signalHash</code> specified as:</p>
+<pre><code class="language-solidity">uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
+</code></pre>
+<p>Transactions that target the <code>handleAggregatedOps()</code>function (ie. PBH 4337 Bundles) must contain an aggregated signature consisting of an array of <code>PBHPayload</code> where there is a <code>PBHPayload</code> for each <code>UserOp</code> in the bundle. The included <code>proof</code> must be generated with a <code>signalHash</code> specified as:</p>
+<pre><code class="language-solidity">uint256 signalHash = abi.encodePacked(sender, userOp.nonce, userOp.callData).hashToField();
+</code></pre>
+<h4 id="external-nullifier-1"><a class="header" href="#external-nullifier-1">External Nullifier</a></h4>
+<p>PBH transactions must contain a valid external nullifier where:</p>
+<ul>
+<li>The <code>month</code> is the current month</li>
+<li>The <code>year</code> is the current year (specified as <code>yyyy</code>)</li>
+<li>The <code>pbhNonce</code> is &lt; <code>pbhNonceLimit</code>. PBH nonces are <code>0</code> indexed, meaning if the <code>pbhNonce</code> limit is <code>29</code>, a user is allotted <code>30</code> PBH transactions per month.</li>
+</ul>
+<h4 id="root"><a class="header" href="#root">Root</a></h4>
+<p>The <code>root</code> provided must be a valid <a href="https://github.com/worldcoin/world-id-contracts/blob/main/src/WorldIDIdentityManagerImplV1.sol#L67">World ID Root</a> with a timestamp less than 7 days old.</p>
+<h4 id="proof"><a class="header" href="#proof">Proof</a></h4>
+<p>The <code>proof</code> must be a valid semaphore proof, proving inclusion in the World ID set associated with the specified <code>root</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="pbh-contracts"><a class="header" href="#pbh-contracts">PBH Contracts</a></h1>
 <ul>
 <li>PBH Entry point</li>
