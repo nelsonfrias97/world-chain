@@ -156,7 +156,7 @@
 <p>World Chain is an OP Stack chain that enables Priority Blockspace for Humans (PBH) through the World Chain Builder. World Chain leverages <a href="https://github.com/flashbots/rollup-boost">rollup-boost</a> to support external block production, allowing the builder to propose PBH blocks to the sequencer while remaining fully compatible with the OP Stack.</p>
 <h2 id="block-production-on-the-op-stack"><a class="header" href="#block-production-on-the-op-stack">Block Production on the OP Stack</a></h2>
 <p>The <a href="https://specs.optimism.io/protocol/exec-engine.html#engine-api">Engine API</a> defines the communication protocol between the Consensus Layer (CL) and the Execution Layer (EL) and is responsible for orchestrating block production on the OP Stack. Periodically, the sequencer's consensus client will send a fork choice update (FCU) to its execution client, signaling for a new block to be built. After a series of API calls between the CL and EL, the EL will return a new <code>ExecutionPayload</code> containing a newly constructed block. The CL will then advance the unsafe head of the chain and peer the new block to other nodes in the network.</p>
-<pre><code class="language-mermaid">sequenceDiagram
+<pre class="mermaid">sequenceDiagram
     box OP Stack Sequencer
         participant sequencer-cl as Sequencer CL
         participant sequencer-el as Sequencer EL
@@ -174,13 +174,13 @@
     sequencer-cl-&gt;&gt;peers-cl: Propagate new block
 
 
-</code></pre>
+</pre>
 <p>For a detailed look at how block production works on the OP Stack, see the <a href="https://specs.optimism.io/protocol/exec-engine.html#engine-api">OP Stack specs</a>.</p>
 <h2 id="rollup-boost"><a class="header" href="#rollup-boost">Rollup Boost</a></h2>
 <p><code>rollup-boost</code> is a block building sidecar for OP Stack chains, enabling external block production while remaining fully compatible with the OP Stack. <code>rollup-boost</code> acts as an intermediary between the sequencer's consensus and execution client. When <code>sequencer-cl</code> sends a new FCU to <code>rollup-boost</code>, the request will be multiplexed to both the sequencer's execution client and external block builders signaling that a new block should be built.</p>
 <p>When the sequencer is ready to propose a new block, <code>op-node</code> will send an <code>engine_getPayload</code> request to <code>rollup-boost</code> which is forwarded to the default execution client and external block builders.</p>
 <p>Once <code>rollup-boost</code> receives the built block from external builder, it will then validate the block by sending it to the sequencer's execution client via <code>engine_newPayload</code>. If the external block is valid, it is returned to the sequencer's <code>op-node</code>, otherwise <code>rollup-boost</code> will return the fallback block. Note that <code>rollup-boost</code> will always fallback to the default execution client's block in the case that the external builder does not respond in time or returns an invalid block.</p>
-<pre><code class="language-mermaid">sequenceDiagram
+<pre class="mermaid">sequenceDiagram
     box Sequencer
         participant sequencer-cl as Sequencer CL
         participant rollup-boost
@@ -219,7 +219,7 @@
     rollup-boost-&gt;&gt;sequencer-cl: {executionPayload, blockValue}
     
     Note over sequencer-cl: Propagate new block
-</code></pre>
+</pre>
 <p>In addition to Engine API requests, <code>rollup-boost</code> will proxy all RPC calls from the sequencer <code>op-node</code> to its local execution client. The following RPC calls will also be forwarded to external builders:</p>
 <ul>
 <li><code>miner_*</code>
