@@ -205,7 +205,7 @@ function decode(uint256 externalNullifier)
 <br>
 <p>The <strong>World Chain Builder</strong> enforces:</p>
 <ul>
-<li>The <code>external_nullifier</code> is correctly formatted and includes the current year, month and valid nonce.</li>
+<li>The <code>external_nullifier</code> is correctly formatted and specifies the current month, year and a valid nonce.</li>
 <li>The <code>proof</code> is valid and specifies the <code>external_nullifier</code> as a public input to the proof.</li>
 <li>The <code>external_nullifier</code> has not been used before, ensuring that the <code>pbh_nonce</code> is unique for the given month and year.</li>
 </ul>
