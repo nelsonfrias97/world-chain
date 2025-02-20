@@ -210,7 +210,7 @@ function decode(uint256 externalNullifier)
 <li>The <code>external_nullifier</code> has not been used before, ensuring that the <code>pbh_nonce</code> is unique for the given month and year.</li>
 </ul>
 <h3 id="signal-hash"><a class="header" href="#signal-hash">Signal Hash</a></h3>
-<p>One of the inputs when <a href="https://docs.rs/semaphore-rs/0.3.1/semaphore_rs/protocol/fn.generate_proof.html">generating a World ID proof</a> is the <code>signal_hash</code>.
+<p>One of the required inputs when <a href="https://docs.rs/semaphore-rs/0.3.1/semaphore_rs/protocol/fn.generate_proof.html">generating a World ID proof</a> is the <code>signal_hash</code>.
 As the name suggests, the <code>signal_hash</code> is the hash of the <a href="https://docs.semaphore.pse.dev/V2/technical-reference/circuits#signal">signal</a> which is an arbitrary message provided by the prover, allowing the verifier to hash the <code>signal</code> when verifying the proof, ensuring that the proof was generated with the expected inputs.</p>
 <p>Within the context of PBH, the <code>signal_hash</code> is used to ensure the proof was created for the transaction being submitted. Depending on the type of the PBH transaction, this value could be a hash of the tx calldata, a 4337 UserOp hash or the tx hash itself.</p>
 
